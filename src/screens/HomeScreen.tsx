@@ -71,6 +71,14 @@ export function HomeScreen() {
         </TouchableOpacity>
         
         <TouchableOpacity 
+          className="flex-1 bg-white p-4 rounded-2xl mx-2 shadow-sm border border-slate-100 items-center"
+          onPress={() => navigation.navigate('History')}
+        >
+          <IconButton icon="history" iconColor="#6366f1" size={28} className="m-0 mb-2" />
+          <Text className="font-semibold text-slate-700">History</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
           className="flex-1 bg-white p-4 rounded-2xl ml-2 shadow-sm border border-slate-100 items-center"
           onPress={() => navigation.navigate('Settings')}
         >

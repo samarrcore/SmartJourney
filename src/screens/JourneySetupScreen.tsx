@@ -27,8 +27,10 @@ export function JourneySetupScreen() {
       setTransportMode(mode as any);
       
       await LocationService.startTracking({
-        latitude: destination.lat,
-        longitude: destination.lng
+        destination: {
+          latitude: destination.lat,
+          longitude: destination.lng,
+        },
       });
       
       setIsTrackingActive(true);

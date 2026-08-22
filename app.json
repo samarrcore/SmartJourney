@@ -48,6 +48,12 @@
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
         }
+      ],
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true
+        }
       ]
     ],
     "extra": {

@@ -15,7 +15,9 @@ export interface LiveStats {
   currentSpeed: number; // in meters/second
   remainingDistance: number; // in meters
   confidenceTier: ConfidenceTier;
+  confidenceScore: number; // 0-100 multi-signal confidence
   eta: number; // timestamp or milliseconds
+  batteryLevel: number | null; // 0-1, null when unknown
 }
 
 export interface JourneyState {

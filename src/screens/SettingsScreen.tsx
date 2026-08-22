@@ -1,12 +1,17 @@
 import React from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { List, Switch, Divider } from 'react-native-paper';
+import { useSettingsStore } from '../store/useSettingsStore';
 
 export function SettingsScreen() {
-  const [darkTheme, setDarkTheme] = React.useState(false);
-  const [notifications, setNotifications] = React.useState(true);
-  const [vibrate, setVibrate] = React.useState(true);
-  const [highAccuracy, setHighAccuracy] = React.useState(true);
+  const darkTheme = useSettingsStore((s) => s.darkTheme);
+  const notificationsEnabled = useSettingsStore((s) => s.notificationsEnabled);
+  const vibrateEnabled = useSettingsStore((s) => s.vibrateEnabled);
+  const highAccuracyMode = useSettingsStore((s) => s.highAccuracyMode);
+  const setDarkTheme = useSettingsStore((s) => s.setDarkTheme);
+  const setNotificationsEnabled = useSettingsStore((s) => s.setNotificationsEnabled);
+  const setVibrateEnabled = useSettingsStore((s) => s.setVibrateEnabled);
+  const setHighAccuracyMode = useSettingsStore((s) => s.setHighAccuracyMode);
 
   return (
     <ScrollView className="flex-1 bg-slate-50">
@@ -34,13 +39,13 @@ export function SettingsScreen() {
           description="Show alerts when approaching"
           titleStyle={{ color: '#1e293b', fontWeight: '600' }}
           left={props => <List.Icon {...props} icon="bell-ring" color="#64748b" />}
-          right={() => <Switch value={notifications} onValueChange={setNotifications} color="#4f46e5" />}
+          right={() => <Switch value={notificationsEnabled} onValueChange={setNotificationsEnabled} color="#4f46e5" />}
         />
         <List.Item
           title="Vibrate on Alarm"
           titleStyle={{ color: '#1e293b', fontWeight: '600' }}
           left={props => <List.Icon {...props} icon="vibrate" color="#64748b" />}
-          right={() => <Switch value={vibrate} onValueChange={setVibrate} color="#4f46e5" />}
+          right={() => <Switch value={vibrateEnabled} onValueChange={setVibrateEnabled} color="#4f46e5" />}
         />
       </List.Section>
 
@@ -53,7 +58,7 @@ export function SettingsScreen() {
           description="Uses more battery but ensures precision"
           titleStyle={{ color: '#1e293b', fontWeight: '600' }}
           left={props => <List.Icon {...props} icon="crosshairs-gps" color="#64748b" />}
-          right={() => <Switch value={highAccuracy} onValueChange={setHighAccuracy} color="#4f46e5" />}
+          right={() => <Switch value={highAccuracyMode} onValueChange={setHighAccuracyMode} color="#4f46e5" />}
         />
       </List.Section>
     </ScrollView>
