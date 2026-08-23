@@ -63,6 +63,10 @@ export class LocationService {
   /** Ensures startup reconciliation runs once and can be awaited by startTracking. */
   private static recoveryPromise: Promise<RecoveryStatus> | null = null;
 
+  /** How often the watchdog verifies native tracking survived while a journey is active. */
+  private static readonly WATCHDOG_INTERVAL_MS = 60_000;
+  private static watchdogTimer: ReturnType<typeof setInterval> | null = null;
+
   // Battery cache - refreshed at most once per minute to keep the task cheap.
   private static batteryLevel: number | null = null;
   private static batteryCharging = false;
@@ -319,6 +323,7 @@ export class LocationService {
     const destinationName =
       useJourneyStore.getState().destination?.name ?? undefined;
     AlarmService.triggerJourneyReminder(destinationName).catch(console.error);
+    this.startTrackingWatchdog();
   }
 
   /**
@@ -339,6 +344,7 @@ export class LocationService {
       this.isTracking = false;
       this.destination = null;
       this.restartPromise = null;
+      this.stopTrackingWatchdog();
       useJourneyStore.getState().setIsTrackingActive(false);
     }
   }
@@ -385,6 +391,7 @@ export class LocationService {
       if (nativeAlive) {
         if (this.rehydrateFromStore()) {
           useJourneyStore.getState().setTrackingInterrupted(false);
+          this.startTrackingWatchdog();
           return 'recovered';
         }
         return 'idle';
@@ -457,6 +464,7 @@ export class LocationService {
     this.permissionsVerified = true;
     useJourneyStore.getState().setIsTrackingActive(true);
     useJourneyStore.getState().setTrackingInterrupted(false);
+    this.startTrackingWatchdog();
     return 'resumed';
   }
 
@@ -498,6 +506,47 @@ export class LocationService {
     return this.currentInterval;
   }
 
+  // -------------------------------------------------------------------
+  // Runtime watchdog
+  // -------------------------------------------------------------------
+
+  /**
+   * The background task emits nothing once the OS has killed it, so native
+   * tracking death mid-journey is invisible to the event pipeline. An
+   * independent probe notices, and surfaces through the existing
+   * interrupted-journey flow rather than failing silently.
+   */
+  private static startTrackingWatchdog() {
+    this.stopTrackingWatchdog();
+    this.watchdogTimer = setInterval(() => {
+      void this.verifyNativeTrackingAlive();
+    }, this.WATCHDOG_INTERVAL_MS);
+  }
+
+  private static stopTrackingWatchdog() {
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+  }
+
+  private static async verifyNativeTrackingAlive() {
+    if (!this.isTracking || this.simulationActive) return;
+    try {
+      const started = await Location.hasStartedLocationUpdatesAsync(
+        BACKGROUND_LOCATION_TASK
+      );
+      if (started) return;
+
+      console.error('Native tracking died mid-journey');
+      this.isTracking = false;
+      this.destination = null;
+      useJourneyStore.getState().setTrackingInterrupted(true);
+    } catch (error) {
+      console.error('Tracking watchdog query failed:', error);
+    }
+  }
+
   /**
    * Adapts the polling interval dynamically based on remaining distance.
    * Restarts are debounced through restartPromise so rapid updates never
@@ -536,7 +585,13 @@ export class LocationService {
     if (this.simulationActive) return;
 
     this.restartPromise = this.reconfigure(destination, newInterval, newDistanceInterval)
-      .catch((error) => console.error('Adaptive reconfiguration failed:', error))
+      .catch((error) => {
+        console.error('Adaptive reconfiguration failed, retrying once:', error);
+        return this.applyTrackingConfig(newInterval, newDistanceInterval);
+      })
+      .catch((error) => {
+        console.error('Adaptive reconfiguration retry failed:', error);
+      })
       .finally(() => {
         this.restartPromise = null;
       });
