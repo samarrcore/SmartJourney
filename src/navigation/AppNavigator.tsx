@@ -8,6 +8,7 @@ import { LiveJourneyScreen } from '../screens/LiveJourneyScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { PermissionsCenterScreen } from '../screens/PermissionsCenterScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
+import { DevSimulatorScreen } from '../screens/DevSimulatorScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -52,11 +53,18 @@ export function AppNavigator() {
         component={PermissionsCenterScreen} 
         options={{ title: 'Permissions' }} 
       />
-      <Stack.Screen 
-        name="History" 
-        component={HistoryScreen} 
-        options={{ title: 'Journey History' }} 
+      <Stack.Screen
+        name="History"
+        component={HistoryScreen}
+        options={{ title: 'Journey History' }}
       />
+      {__DEV__ && (
+        <Stack.Screen
+          name="DevSimulator"
+          component={DevSimulatorScreen}
+          options={{ title: 'Journey Simulator' }}
+        />
+      )}
     </Stack.Navigator>
   );
 }

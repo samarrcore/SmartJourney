@@ -137,6 +137,16 @@ export function HomeScreen() {
         </Card>
       )}
 
+      {__DEV__ && (
+        <TouchableOpacity
+          className="mt-2 bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex-row items-center"
+          onPress={() => navigation.navigate('DevSimulator')}
+        >
+          <IconButton icon="bug-play" iconColor="#4f46e5" size={24} className="m-0 mr-2" />
+          <Text className="font-semibold text-slate-700">Dev: Journey Simulator</Text>
+        </TouchableOpacity>
+      )}
+
       <View className="flex-row justify-between mb-6">
         <TouchableOpacity 
           className="flex-1 bg-white p-4 rounded-2xl mr-2 shadow-sm border border-slate-100 items-center"

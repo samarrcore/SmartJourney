@@ -183,7 +183,7 @@ export function PermissionsCenterScreen() {
       </Card>
 
       <PermissionRow
-        icon="gps-fixed"
+        icon="radar"
         title="Location Services"
         description="Device-level GPS must be switched on."
         state={snapshot.locationServices === null ? 'unknown' : snapshot.locationServices ? 'granted' : 'critical'}
@@ -260,7 +260,7 @@ export function PermissionsCenterScreen() {
       />
 
       <PermissionRow
-        icon="radar"
+        icon="map-marker-path"
         title="Tracking Status"
         description="Whether SmartJourney is currently monitoring a journey."
         state={trackingInterrupted ? 'action' : isTrackingActive ? 'granted' : 'unknown'}

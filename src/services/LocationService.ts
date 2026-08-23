@@ -460,6 +460,44 @@ export class LocationService {
     return 'resumed';
   }
 
+  // -------------------------------------------------------------------
+  // Dev-only simulation hooks used by src/dev/JourneySimulator.ts.
+  // These bypass the native location stack and must never run in production.
+  // -------------------------------------------------------------------
+
+  private static simulationActive = false;
+
+  public static isSimulating(): boolean {
+    return this.simulationActive;
+  }
+
+  public static beginSimulatedJourney(options: { destination: Coordinates }): void {
+    this.destination = options.destination;
+    this.speedHistory = [];
+    this.hasTriggeredGentleAlert = false;
+    this.inRangeConfirmations = 0;
+    this.journeyStartedAt = Date.now();
+    this.currentInterval = DEFAULT_INTERVAL_MS;
+    this.simulationActive = true;
+    this.isTracking = true;
+    void this.refreshBattery(true);
+  }
+
+  public static ingestLocation(location: Location.LocationObject): void {
+    if (!this.simulationActive) return;
+    void this.handleLocationUpdate(location);
+  }
+
+  public static endSimulatedJourney(): void {
+    this.simulationActive = false;
+    this.isTracking = false;
+    this.destination = null;
+  }
+
+  public static getPollingInterval(): number {
+    return this.currentInterval;
+  }
+
   /**
    * Adapts the polling interval dynamically based on remaining distance.
    * Restarts are debounced through restartPromise so rapid updates never
@@ -494,6 +532,8 @@ export class LocationService {
 
     const destination = this.destination;
     this.currentInterval = newInterval;
+
+    if (this.simulationActive) return;
 
     this.restartPromise = this.reconfigure(destination, newInterval, newDistanceInterval)
       .catch((error) => console.error('Adaptive reconfiguration failed:', error))
