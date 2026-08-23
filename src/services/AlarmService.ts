@@ -245,7 +245,7 @@ class AlarmService {
     if (!useSettingsStore.getState().notificationsEnabled) return;
 
     const id = await notifee.displayNotification({
-      id: this.alarmNotificationId ?? undefined,
+      ...(this.alarmNotificationId ? { id: this.alarmNotificationId } : {}),
       title,
       body,
       android: {
