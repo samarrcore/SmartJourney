@@ -14,6 +14,12 @@ import AlarmService, { AlarmStage } from './AlarmService';
 
 export const BACKGROUND_LOCATION_TASK = 'BACKGROUND_LOCATION_TASK';
 
+/** Outcome of startup reconciliation between persisted journey and native state. */
+export type RecoveryStatus = 'idle' | 'recovered' | 'interrupted';
+
+/** Result of an explicit user-requested resume after an interruption. */
+export type ResumeStatus = 'resumed' | 'missing_permissions' | 'no_journey';
+
 /** Readings kept for movement-consistency analysis in the ConfidenceEngine. */
 const SPEED_HISTORY_SIZE = 5;
 
@@ -22,6 +28,10 @@ const SPEED_HISTORY_SIZE = 5;
  * alarm when confidence is POOR (GPS drift / false-positive protection).
  */
 const LOW_CONFIDENCE_CONFIRMATIONS = 2;
+
+/** Fallback polling config used when the native config is unknown. */
+const DEFAULT_INTERVAL_MS = 10000;
+const DEFAULT_DISTANCE_M = 10;
 
 export interface LocationUpdateListener {
   (
@@ -49,6 +59,9 @@ export class LocationService {
 
   /** Guards against overlapping adaptive restarts. */
   private static restartPromise: Promise<void> | null = null;
+
+  /** Ensures startup reconciliation runs once and can be awaited by startTracking. */
+  private static recoveryPromise: Promise<RecoveryStatus> | null = null;
 
   // Battery cache - refreshed at most once per minute to keep the task cheap.
   private static batteryLevel: number | null = null;
@@ -273,6 +286,10 @@ export class LocationService {
   public static async startTracking(options: TrackingOptions) {
     const { destination, interval = 10000, distanceInterval = 10 } = options;
 
+    if (this.recoveryPromise) {
+      await this.recoveryPromise;
+    }
+
     if (!this.permissionsVerified) {
       const hasPermission = await this.requestPermissions();
       if (!hasPermission) {
@@ -285,6 +302,11 @@ export class LocationService {
     this.hasTriggeredGentleAlert = false;
     this.inRangeConfirmations = 0;
     this.journeyStartedAt = Date.now();
+
+    const store = useJourneyStore.getState();
+    store.setStartedAt(this.journeyStartedAt);
+    store.setTrackingInterrupted(false);
+
     void this.refreshBattery(true);
 
     await this.applyTrackingConfig(interval, distanceInterval);
@@ -319,6 +341,123 @@ export class LocationService {
       this.restartPromise = null;
       useJourneyStore.getState().setIsTrackingActive(false);
     }
+  }
+
+  /**
+   * Reconciles the persisted journey with real native tracking state after a
+   * JavaScript process restart. Runs once per session; startTracking awaits
+   * it so a late recovery can never overwrite a newly started journey.
+   *
+   * - Native tracking alive  -> rehydrates this service and resumes alarm
+   *   evaluation ('recovered').
+   * - Native tracking dead   -> flags the journey as interrupted so the UI
+   *   can offer resume/discard ('interrupted').
+   * - Orphaned native tracking with no persisted journey -> stopped ('idle').
+   */
+  public static reconcileActiveJourney(): Promise<RecoveryStatus> {
+    if (!this.recoveryPromise) {
+      this.recoveryPromise = this.performReconciliation();
+    }
+    return this.recoveryPromise;
+  }
+
+  private static async performReconciliation(): Promise<RecoveryStatus> {
+    try {
+      const journey = useJourneyStore.getState();
+      const hadActiveJourney = journey.isTrackingActive && !!journey.destination;
+
+      let nativeAlive = false;
+      try {
+        nativeAlive = await Location.hasStartedLocationUpdatesAsync(
+          BACKGROUND_LOCATION_TASK
+        );
+      } catch (error) {
+        console.error('Failed to query native tracking state:', error);
+      }
+
+      if (!hadActiveJourney) {
+        if (nativeAlive) {
+          await this.stopTracking();
+        }
+        return 'idle';
+      }
+
+      if (nativeAlive) {
+        if (this.rehydrateFromStore()) {
+          useJourneyStore.getState().setTrackingInterrupted(false);
+          return 'recovered';
+        }
+        return 'idle';
+      }
+
+      useJourneyStore.getState().setTrackingInterrupted(true);
+      return 'interrupted';
+    } catch (error) {
+      console.error('Journey reconciliation failed:', error);
+      return 'idle';
+    }
+  }
+
+  /**
+   * Restores per-journey state from the persisted store so the background
+   * task pipeline (confidence -> prediction -> alarms) resumes unchanged.
+   * Returns false when there is nothing to recover or a newer journey
+   * already owns tracking.
+   */
+  private static rehydrateFromStore(): boolean {
+    const journey = useJourneyStore.getState();
+    if (!journey.destination || !journey.isTrackingActive) return false;
+    if (this.isTracking) return false;
+
+    this.destination = {
+      latitude: journey.destination.lat,
+      longitude: journey.destination.lng,
+    };
+    this.speedHistory = [];
+    this.hasTriggeredGentleAlert = false;
+    this.inRangeConfirmations = 0;
+    this.journeyStartedAt = journey.startedAt ?? Date.now();
+    this.currentInterval = DEFAULT_INTERVAL_MS;
+    this.isTracking = true;
+    void this.refreshBattery(true);
+
+    void Location.getBackgroundPermissionsAsync()
+      .then(({ status }) => {
+        this.permissionsVerified = status === 'granted';
+      })
+      .catch(() => undefined);
+
+    return true;
+  }
+
+  /**
+   * User-requested resume of an interrupted journey. Checks permissions
+   * without prompting, restarts native tracking and clears the interrupted
+   * flag. Throws only when the native restart itself fails.
+   */
+  public static async resumeAfterInterruption(): Promise<ResumeStatus> {
+    const [fg, bg] = await Promise.all([
+      Location.getForegroundPermissionsAsync(),
+      Location.getBackgroundPermissionsAsync(),
+    ]);
+    if (fg.status !== 'granted' || bg.status !== 'granted') {
+      return 'missing_permissions';
+    }
+
+    if (!this.rehydrateFromStore()) return 'no_journey';
+
+    try {
+      await this.applyTrackingConfig(DEFAULT_INTERVAL_MS, DEFAULT_DISTANCE_M);
+    } catch (error) {
+      this.isTracking = false;
+      this.destination = null;
+      throw error;
+    }
+
+    this.permissionsVerified = true;
+    useJourneyStore.getState().setIsTrackingActive(true);
+    useJourneyStore.getState().setTrackingInterrupted(false);
+    return 'resumed';
   }
 
   /**

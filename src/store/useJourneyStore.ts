@@ -26,6 +26,10 @@ export interface JourneyState {
   transportMode: TransportMode;
   liveStats: LiveStats | null;
   isTrackingActive: boolean;
+  /** Epoch millis when the active journey started; null outside a journey. */
+  startedAt: number | null;
+  /** True when startup found a persisted journey whose native tracking died. */
+  trackingInterrupted: boolean;
 
   // Actions
   setDestination: (dest: Destination | null) => void;
@@ -33,6 +37,8 @@ export interface JourneyState {
   setTransportMode: (mode: TransportMode) => void;
   setLiveStats: (stats: LiveStats | null) => void;
   setIsTrackingActive: (isActive: boolean) => void;
+  setStartedAt: (startedAt: number | null) => void;
+  setTrackingInterrupted: (interrupted: boolean) => void;
   resetJourney: () => void;
 }
 
@@ -44,17 +50,23 @@ export const useJourneyStore = create<JourneyState>()(
       transportMode: 'driving',
       liveStats: null,
       isTrackingActive: false,
+      startedAt: null,
+      trackingInterrupted: false,
 
       setDestination: (destination) => set({ destination }),
       setWakeDistance: (wakeDistance) => set({ wakeDistance }),
       setTransportMode: (transportMode) => set({ transportMode }),
       setLiveStats: (liveStats) => set({ liveStats }),
       setIsTrackingActive: (isTrackingActive) => set({ isTrackingActive }),
+      setStartedAt: (startedAt) => set({ startedAt }),
+      setTrackingInterrupted: (trackingInterrupted) => set({ trackingInterrupted }),
       resetJourney: () =>
         set({
           destination: null,
           liveStats: null,
           isTrackingActive: false,
+          startedAt: null,
+          trackingInterrupted: false,
         }),
     }),
     {

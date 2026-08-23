@@ -15,6 +15,10 @@ try {
   console.error("Failed to initialize TaskManager:", error);
 }
 
+// Reconcile any persisted journey with native tracking before the UI can
+// start a new one; startTracking awaits this internally.
+LocationService.reconcileActiveJourney();
+
 export default function App() {
   const darkTheme = useSettingsStore((s) => s.darkTheme);
 

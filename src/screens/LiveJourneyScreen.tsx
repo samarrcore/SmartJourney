@@ -30,6 +30,7 @@ export function LiveJourneyScreen() {
         lng: journey.destination.lng,
         transportMode: journey.transportMode,
         wakeDistance: journey.wakeDistance,
+        startedAt: journey.startedAt ?? undefined,
         endedAt: Date.now(),
         outcome: 'cancelled',
       });
