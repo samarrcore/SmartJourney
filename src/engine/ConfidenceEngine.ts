@@ -78,7 +78,15 @@ export class ConfidenceEngine {
       freshnessPoints +
       batteryPoints;
 
-    const score = Math.max(0, Math.min(100, Math.round(raw)));
+    let score = Math.max(0, Math.min(100, Math.round(raw)));
+
+    // A physically impossible speed means the fix itself cannot be trusted,
+    // no matter how clean the other signals look. scoreSpeedSanity returns 0
+    // only when speed exceeds 2x the mode's plausible ceiling.
+    if (speedPoints === 0 && inputs.speed !== null) {
+      score = Math.min(score, 40);
+    }
+
     const level: ConfidenceLevel =
       score >= 80 ? ConfidenceLevel.GOOD : score >= 50 ? ConfidenceLevel.DEGRADED : ConfidenceLevel.POOR;
 

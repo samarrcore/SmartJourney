@@ -11,6 +11,11 @@
     },
     "android": {
       "package": "com.smartjourney.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "PLACEHOLDER_REPLACE_WITH_REAL_GOOGLE_MAPS_API_KEY"
+        }
+      },
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -55,7 +60,8 @@
         {
           "enableBackgroundPlayback": true
         }
-      ]
+      ],
+      "expo-font"
     ],
     "extra": {
       "eas": {
