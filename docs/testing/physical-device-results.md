@@ -73,6 +73,36 @@ is what makes this conclusive.
 - **The device was USB-charging** throughout (`battery unplug` only fakes the
   source for Doze), so drain could not be measured; Scenario F is still outstanding.
 
+## Scenario B — locked-screen arrival: PASS
+
+This is the clause of §15 that had not yet been demonstrated: the alarm reaching a
+phone that is **locked** as well as backgrounded.
+
+Setup: journey to "Irungalur" (~1.1 km away) with the **default 2.0 km wake
+distance** — a realistic configuration this time, not the artificial 20 km maximum
+used elsewhere. Screen turned off and the keyguard confirmed showing *before* the
+alarm, so nothing about the result depends on the app being visible.
+
+| Time | Event |
+|---|---|
+| 18:19:33 | Start Tracking; screen off, `mWakefulness=Dozing`, `isKeyguardShowing=true` |
+| 18:19:39 | Stage 3 `Wake Up!` fired while still `Dozing` with the keyguard showing |
+| 18:19:42 | `PowerManagerService: Waking up from Dozing (reason=WAKE_REASON_APPLICATION, details=com.android.systemui:full_screen_intent)` |
+| 18:19:42+ | Screen `Awake` with the keyguard still up; the alarm surfaced over the lock screen |
+| 18:20:15 | A second full-screen wake, from a re-post of the alarm notification |
+
+The full-screen intent is what defeats the lock screen, and it works from deep
+Doze. The alarm notification was visible on the lock screen itself
+(`SmartJourney · now` in the lock-screen notification list).
+
+`USE_FULL_SCREEN_INTENT` reads `default` with a `rejectTime`, which is expected
+rather than a problem: Android suppresses full-screen intents while the screen is
+already interactive, so only the locked / screen-off wake matters and that is the
+one that worked.
+
+This closes the last untested clause of §15's wording. What remains for §15 is
+Scenario G — an actual journey that wakes an actual sleeping traveller.
+
 ## Run 1 — invalidated (recorded for honesty)
 
 An earlier soak (17:16:12 → 17:26:16) is **not usable**. At 17:18:22 the log shows
@@ -219,48 +249,47 @@ key (`PLACEHOLDER_REPLACE_WITH_REAL_GOOGLE_MAPS_API_KEY`) prevents the map from
 initialising. This removes the only way to pick an arbitrary nearby point, which
 matters for testing and for the product.
 
-### F6 — escalation lives only in memory and dies with the process (critical)
+### F6 — escalation lives only in memory (robustness gap, not an observed system kill)
 
-**The escalation ladder is lost entirely if the app process is killed while the
-alarm is ringing.** Stage 4 and Stage 5 — the stages whose whole purpose is to
-wake a deep sleeper when Stage 3 was not enough — never fire, and the siren dies
-with the process, leaving only a stale notification that still reads "Wake Up!".
-
-Observed directly. Run A (`Start Tracking` + screen off):
+**Correction.** An earlier version of this file called this "critical" and implied
+the app had died on its own. It had not. The user confirmed they **physically
+killed the app by mistake** during Run A, and the log corroborates that exactly:
 
 ```
-18:01:10   Wake Up!                        stage 3 fires, siren starts
 18:02:29   ActivityManager: Killing 16484:com.smartjourney.app/u0a311 (adj 905): remove task
 18:02:29   AS.AudioDeviceBroker: Communication client died        <- siren dies with the process
 18:02:30   ReactNativeJS: Running "main"   (pid 18772)            <- fresh JS context
-18:06:47   polling ends, 5+ minutes elapsed
-           MAXIMUM ALARM      never observed
-           EMERGENCY MODE     never observed
 ```
 
-Because `AlarmService.stage`, `escalationTimer` and the siren player are all
-`static` in-memory state, a restarted JS context begins at `stage = NONE`. Nothing
-re-arms escalation and nothing clears the notification, so the traveller gets a
-silent phone and a stuck notification while believing an alarm is running.
+`remove task` is what a Recents swipe produces, and the app was at adj 905
+(cached) when it happened. So this was a deliberate user action. **Nothing in this
+run shows the app dying unexpectedly**, and it should not be read as evidence of an
+OEM or low-memory kill, nor as a failure of the watchdog.
 
-This also **corrects an earlier claim in this file**: Run A's ~5 minutes of siren
-was previously read as "escalation certainly continued". It did not. A looping
-siren sounds identical whether or not escalation is happening, which is exactly
-why the notification title had to be polled rather than inferred.
+What remains true, stated without overstating it:
 
-The kill reason recorded was `remove task` at adj 905 (cached). A
-`REQUEST_PERMISSIONS` activity had started at 18:01:05 when *Start Tracking* was
-pressed, so the precise trigger is not fully pinned down — it may have been
-influenced by the screen being turned off while that dialog was up. **The
-consequence, however, is trigger-independent**: any process death during an alarm
-(low memory, OEM kill, task removal, crash) silently cancels the escalation ladder
-for good.
+- `AlarmService.stage`, `escalationTimer` and the siren player are `static`
+  in-memory state, so if the process dies during an alarm the escalation ladder
+  ends permanently.
+- The notifee notification is posted natively and outlives the process, so it kept
+  reading `Wake Up!` while nothing was escalating and no siren was playing — a
+  phantom alarm.
+- Observed consequence: no `MAXIMUM ALARM` or `EMERGENCY MODE` for the 5+ minutes
+  of polling in Run A, versus correct **+91 s / +178 s** in Run B where the process
+  survived.
 
-Fix direction: escalation must not depend on process-resident timers. Use a
-mechanism the OS owns and restores — notifee trigger notifications
-(`TimestampTrigger`) or an `AlarmManager`-backed alarm — so stages 4 and 5 still
-arrive after a process restart. The alarm notification should also carry a fixed
-id so a restarted process can find and cancel it (see F4).
+Severity: **low on this device.** No spontaneous kill was observed, and the
+foreground service makes one unlikely on near-stock Nothing OS (the app held
+`isForeground=true` with `types=0x00000008` throughout the Doze soak). It would
+matter more on aggressive OEM skins. The phantom-notification behaviour is
+arguably wrong regardless of trigger — after a task removal the alarm should
+either keep ringing or stop cleanly and visibly, not leave a silent notification
+claiming an alarm is active.
+
+Fix, if it is ever wanted: drive stages 4–5 from something the OS restores rather
+than a process-resident `setTimeout` (notifee `TimestampTrigger`, or an
+`AlarmManager`-backed alarm), and give the alarm a fixed notification id so a fresh
+process can cancel it (which also closes F4).
 
 ### Scenario C2 — escalation timing: measured and correct
 
@@ -294,13 +323,15 @@ the launcher in the earlier run.
 
 ## Outstanding
 
-- **F6 — the critical one.** Escalation must survive process death; today it does not.
-- Scenario A / B — a real approach, and a true screen-off locked-screen arrival
+- Scenario A — a real approach with the app backgrounded
 - Scenario D — battery saver / restricted background
 - Scenario E1/E2 — deliberate process-death and OEM-kill runs capturing the banner
 - Scenario F — battery drain with the device genuinely unplugged
-- Scenario G — a real journey that actually wakes the traveller (§15 itself)
+- Scenario G — **a real journey that actually wakes the traveller.** This is the
+  only remaining piece of §15; every mechanism under it has now been measured on
+  hardware.
 - F3 (JS console on release unproven), F4 (fragile alarm notification id),
-  F5 (map selection blocked by the placeholder Maps key)
+  F5 (map selection blocked by the placeholder Maps key), F6 (low severity —
+  escalation is in-memory only)
 - Scenario C2 under Doze is not measurable and does not need to be: the alarm's
   full-screen intent exits Doze by design.
