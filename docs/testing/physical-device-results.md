@@ -239,15 +239,61 @@ this only makes existing behaviour explicit — and cancel that id in `stopAll()
 once at startup, where any alarm is by definition stale. This also closes F6's
 stale-notification half.
 
-### F5 — map-based destination selection is non-functional
+### F5 — the map had zero height (FIXED); a real Maps key is still required
 
-`DestinationSearchScreen`'s map is centred on the user's position and `onPress`
-sets a pinned destination, with a "Use Pinned Location" button. Tapping the map
-centre produced **no change at all** (the UI dump was byte-identical), so the pin
-flow cannot be used in this build. Almost certainly the placeholder Google Maps
-key (`PLACEHOLDER_REPLACE_WITH_REAL_GOOGLE_MAPS_API_KEY`) prevents the map from
-initialising. This removes the only way to pick an arbitrary nearby point, which
-matters for testing and for the product.
+**Root cause corrected.** This was originally attributed to the placeholder Google
+Maps key. That inference was wrong. `dumpsys activity top` shows the native view:
+
+```
+com.rnmaps.maps.MapView{... 0,0-1084,0 ...}      <- width 1084, height 0
+```
+
+The `MapView` was laid out **zero pixels tall**, so it rendered nothing and could
+never receive a touch — which is exactly why tapping the map centre produced a
+byte-identical UI dump. A 0-height view cannot accept input, so no API key would
+ever have made the pin flow work.
+
+Cause: the map container used a **percentage height** (`h-2/5` in
+`DestinationSearchScreen`, `h-1/3` in `LiveJourneyScreen`). A percentage height
+resolves against the parent's height, which is indefinite here, so Yoga collapsed
+it to 0.
+
+Fix: derive a concrete pixel height from the window with `useWindowDimensions()`
+and apply it as `style={{ height }}`, with the `MapView` on `flex: 1`. Applied to
+both screens. In `LiveJourneyScreen` the hook is declared **above** the
+`if (!destination) return ...` early return — placing it below would have made the
+hook conditional and crashed on the first render without a destination.
+
+Verified on device:
+
+| Screen | Before | After |
+|---|---|---|
+| `DestinationSearchScreen` | `0,0-1084,0` | `0,0-1084,966` |
+| `LiveJourneyScreen` | same defect | `0,0-1084,803` (= windowHeight / 3) |
+
+Tapping the map now sets a pin, renders `Use Pinned Location (lat, lng)`, and the
+pin can be selected to start a journey.
+
+**What remains broken and cannot be fixed in this repo.** With the view finally
+sized, the SDK reported the real key problem:
+
+```
+E Google Android Maps SDK: Authorization failure. Please see
+  https://developers.google.com/maps/documentation/android-sdk/start
+E Google Android Maps SDK: API Key: PLACEHOLDER_REPLACE_WITH_REAL_GOOGLE_MAPS_API_KEY
+```
+
+Tiles will therefore not render. Worse, the pin coordinates are **not trustworthy**
+while authorization fails: the phone sits at ~10.x N, 78.x E, yet tapping the
+visual centre of the map yielded **56.867, 78.963** — Sarkand, Kazakhstan — and the
+implied latitude span was ~460x wider than the requested `latitudeDelta: 0.05`.
+Reverse-geocoding that pin produced a destination 3988.7 km away.
+
+Conclusion: the layout defect is fixed and the pin flow is mechanically alive, but
+**map-based destination selection is not usable until a real Google Maps API key is
+configured** — a Google Cloud resource that cannot be created from this repository.
+Until then, text search via Nominatim remains the reliable way to choose a
+destination, and it works.
 
 ### F6 — escalation lives only in memory (robustness gap, not an observed system kill)
 
@@ -331,7 +377,7 @@ the launcher in the earlier run.
   only remaining piece of §15; every mechanism under it has now been measured on
   hardware.
 - F3 (JS console on release unproven), F4 (fragile alarm notification id),
-  F5 (map selection blocked by the placeholder Maps key), F6 (low severity —
-  escalation is in-memory only)
+  **F5 — layout fixed, but a real Google Maps API key is needed before map
+  selection is usable**, F6 (low severity — escalation is in-memory only)
 - Scenario C2 under Doze is not measurable and does not need to be: the alarm's
   full-screen intent exits Doze by design.

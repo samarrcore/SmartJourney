@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Card, IconButton, Button, ProgressBar } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import MapView, { Marker } from 'react-native-maps';
@@ -19,6 +19,12 @@ export function LiveJourneyScreen() {
   const { destination, liveStats, isTrackingActive, setIsTrackingActive, resetJourney } = useJourneyStore();
   const batteryLevel = useBatteryLevel();
   const batteryState = useBatteryStateHook();
+
+  // Concrete pixel height, for the same reason as DestinationSearchScreen: a
+  // percentage height (h-1/3) collapses to 0 against an indefinite parent.
+  // Declared above the early return below so the hook is never conditional.
+  const { height: windowHeight } = useWindowDimensions();
+  const mapHeight = Math.round(windowHeight / 3);
 
   const handleCancelJourney = async () => {
     const journey = useJourneyStore.getState();
@@ -99,9 +105,9 @@ export function LiveJourneyScreen() {
 
   return (
     <View className="flex-1 bg-slate-50">
-      <View className="h-1/3">
+      <View style={{ height: mapHeight }}>
         <MapView
-          className="flex-1"
+          style={{ flex: 1 }}
           region={{
             latitude: destination.lat,
             longitude: destination.lng,

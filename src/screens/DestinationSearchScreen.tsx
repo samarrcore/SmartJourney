@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, FlatList, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Button, IconButton } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import MapView, { Marker } from 'react-native-maps';
@@ -23,6 +23,12 @@ export function DestinationSearchScreen() {
   const [error, setError] = useState(false);
   const [pinnedLocation, setPinnedLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [mapRegion, setMapRegion] = useState(DEFAULT_REGION);
+  // The map needs a concrete pixel height. A percentage height (h-2/5) resolves
+  // against an indefinite parent height and collapses to 0, which leaves a
+  // MapView that renders nothing and can never receive a tap - the pin flow
+  // becomes silently dead. Deriving the height from the window is immune to that.
+  const { height: windowHeight } = useWindowDimensions();
+  const mapHeight = Math.round(windowHeight * 0.4);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -144,9 +150,9 @@ export function DestinationSearchScreen() {
 
   return (
     <View className="flex-1 bg-white">
-      <View className="h-2/5">
+      <View style={{ height: mapHeight }}>
         <MapView
-          className="flex-1"
+          style={{ flex: 1 }}
           region={mapRegion}
           onPress={({ nativeEvent }) => {
             if (nativeEvent.coordinate) {
