@@ -168,14 +168,24 @@ Only **transit** and **driving** are selectable in journey setup.
 
 **Adaptive polling** (`LocationService.adaptPollingInterval`):
 
-| Remaining distance | Interval | Distance filter |
-|---|---|---|
-| > 50 km | 60 s | 1000 m |
-| > 10 km | 30 s | 500 m |
-| > 2 km | 15 s | 100 m |
-| ≤ 2 km | 5 s | 10 m |
+| Remaining distance | Interval |
+|---|---|
+| > 50 km | 60 s |
+| > 10 km | 30 s |
+| > 2 km | 15 s |
+| ≤ 2 km | 5 s |
 
-So a long journey legitimately produces sparse updates (one fix a minute); a
+The location request passes `distanceInterval: 0` — an **explicit** zero, never
+omitted. expo-location maps this option to
+`LocationRequest.setMinUpdateDistanceMeters`, which withholds updates until the
+device has moved that far, and it derives a default from the accuracy level when
+the option is absent (50 m for `Accuracy.High`, 100 m for `Balanced`). Either way
+a phone resting still inside the wake radius receives no fixes, arrival is never
+re-evaluated, and the alarm never fires. Updates are therefore time-driven, and
+every interval re-checks the distance. This was a real defect found on hardware
+(F1/F2 in `physical-device-results.md`).
+
+A long journey still legitimately produces sparse updates (one fix a minute); a
 "stale-looking" Live Journey screen at 60 km out is by design, not a defect.
 
 **Watchdog**: `WATCHDOG_INTERVAL_MS = 60_000` — native tracking liveness is

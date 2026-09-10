@@ -29,9 +29,8 @@ const SPEED_HISTORY_SIZE = 5;
  */
 const LOW_CONFIDENCE_CONFIRMATIONS = 2;
 
-/** Fallback polling config used when the native config is unknown. */
+/** Fallback polling interval used when the native config is unknown. */
 const DEFAULT_INTERVAL_MS = 10000;
-const DEFAULT_DISTANCE_M = 10;
 
 export interface LocationUpdateListener {
   (
@@ -45,7 +44,6 @@ export interface LocationUpdateListener {
 interface TrackingOptions {
   destination: Coordinates;
   interval?: number;
-  distanceInterval?: number;
 }
 
 export class LocationService {
@@ -288,7 +286,7 @@ export class LocationService {
    * Starts tracking location in the background and foreground.
    */
   public static async startTracking(options: TrackingOptions) {
-    const { destination, interval = 10000, distanceInterval = 10 } = options;
+    const { destination, interval = DEFAULT_INTERVAL_MS } = options;
 
     if (this.recoveryPromise) {
       await this.recoveryPromise;
@@ -313,7 +311,7 @@ export class LocationService {
 
     void this.refreshBattery(true);
 
-    await this.applyTrackingConfig(interval, distanceInterval);
+    await this.applyTrackingConfig(interval);
 
     this.currentInterval = interval;
     this.isTracking = true;
@@ -454,7 +452,7 @@ export class LocationService {
     if (!this.rehydrateFromStore()) return 'no_journey';
 
     try {
-      await this.applyTrackingConfig(DEFAULT_INTERVAL_MS, DEFAULT_DISTANCE_M);
+      await this.applyTrackingConfig(DEFAULT_INTERVAL_MS);
     } catch (error) {
       this.isTracking = false;
       this.destination = null;
@@ -554,20 +552,15 @@ export class LocationService {
    */
   private static async adaptPollingInterval(distanceToDestination: number) {
     let newInterval: number;
-    let newDistanceInterval: number;
 
     if (distanceToDestination > 50000) {
-      newInterval = 60000; // > 50 km -> every minute / 1 km steps
-      newDistanceInterval = 1000;
+      newInterval = 60000; // > 50 km -> every minute
     } else if (distanceToDestination > 10000) {
-      newInterval = 30000; // > 10 km -> every 30 s / 500 m steps
-      newDistanceInterval = 500;
+      newInterval = 30000; // > 10 km -> every 30 s
     } else if (distanceToDestination > 2000) {
-      newInterval = 15000; // > 2 km -> every 15 s / 100 m steps
-      newDistanceInterval = 100;
+      newInterval = 15000; // > 2 km -> every 15 s
     } else {
-      newInterval = 5000; // < 2 km -> every 5 s / 10 m steps
-      newDistanceInterval = 10;
+      newInterval = 5000; // < 2 km -> every 5 s
     }
 
     if (
@@ -579,15 +572,14 @@ export class LocationService {
       return;
     }
 
-    const destination = this.destination;
     this.currentInterval = newInterval;
 
     if (this.simulationActive) return;
 
-    this.restartPromise = this.reconfigure(destination, newInterval, newDistanceInterval)
+    this.restartPromise = this.reconfigure(newInterval)
       .catch((error) => {
         console.error('Adaptive reconfiguration failed, retrying once:', error);
-        return this.applyTrackingConfig(newInterval, newDistanceInterval);
+        return this.applyTrackingConfig(newInterval);
       })
       .catch((error) => {
         console.error('Adaptive reconfiguration retry failed:', error);
@@ -601,18 +593,13 @@ export class LocationService {
    * Re-registers the background task with new intervals. Skips permission
    * checks because they were already validated when tracking started.
    */
-  private static async reconfigure(
-    destination: Coordinates,
-    interval: number,
-    distanceInterval: number
-  ) {
+  private static async reconfigure(interval: number) {
     const highAccuracy = useSettingsStore.getState().highAccuracyMode;
-    await this.applyTrackingConfig(interval, distanceInterval, highAccuracy);
+    await this.applyTrackingConfig(interval, highAccuracy);
   }
 
   private static async applyTrackingConfig(
     interval: number,
-    distanceInterval: number,
     highAccuracy?: boolean
   ) {
     const useHighAccuracy =
@@ -635,7 +622,16 @@ export class LocationService {
         ? Location.Accuracy.High
         : Location.Accuracy.Balanced,
       timeInterval: interval,
-      distanceInterval,
+      // Must be an explicit 0, NOT omitted. expo-location falls back to a
+      // distance derived from the accuracy level (50 m for Accuracy.High,
+      // 100 m for Balanced) and maps it to
+      // LocationRequest.setMinUpdateDistanceMeters, which withholds updates
+      // until the device has moved that far. Omitting the option therefore
+      // still gates delivery, and a phone resting inside the wake radius would
+      // never receive a fix - arrival would never be re-evaluated and the alarm
+      // could never fire. 0 means no distance constraint, leaving updates
+      // purely time-driven so every interval re-checks the distance.
+      distanceInterval: 0,
       showsBackgroundLocationIndicator: true,
       foregroundService: {
         notificationTitle: 'SmartJourney Tracking',
