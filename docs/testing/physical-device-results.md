@@ -181,20 +181,33 @@ The logcat ring buffer also cycles fast (~7 MB in 10 minutes pushed the startup
 lines out), so watchdog evidence needs `logcat -G 16M` or a dedicated filtered
 capture, not a post-hoc dump.
 
-### F4 — a stale alarm notification survives process death
+### F4 — the alarm notification's identity is fragile
 
-After force-stopping the app mid-alarm and relaunching, `dumpsys notification`
-still lists the alarm notification (id `-1945937399`, `ONGOING_EVENT`). It could
-not be cleared by the app, because `AlarmService.alarmNotificationId` is
-in-memory only and is `null` in the new process, so `stopAll()` has nothing to
-cancel. It was **not visible** in the notification shade, so this is latent rather
-than user-facing here — but a wake-up app must never leave a stuck alarm
-notification.
+Two observations, both about the same weakness: the alarm notification is tracked
+by an id that notifee *generates*, captured from the first `displayNotification`
+return value and kept in memory only.
 
-Recommended fix: give the alarm a fixed notification id
-(`showAlarmNotification` already reuses one id across stages 3–5, so this makes
-existing behaviour explicit) and cancel that id both in `stopAll()` and once at
-startup, where any alarm is by definition stale.
+1. **After process death** it cannot be cleared at all. Force-stopping mid-alarm
+   and relaunching left `dumpsys notification` still listing the alarm
+   notification (`-1945937399`, `ONGOING_EVENT`), because `alarmNotificationId` is
+   `null` in the new process so `stopAll()` has nothing to cancel.
+2. **The generated id does not round-trip to the posted notification.**
+   `stopAll()` logged `Removing notification with id LirxNhJYmyEbDZr3cs6o`, yet the
+   live alarm notification was posted under numeric id `532892981`. Cancelling the
+   generated string therefore matches nothing.
+
+In both cases the **user-visible outcome was still correct** — the siren stopped
+and the alarm vanished from the notification shade; only a stale
+`StatusBarNotification` record lingered in dumpsys. So this is latent rather than
+user-facing today. It is recorded because the mechanism is unsound for a wake-up
+app: reliably cancelling the alarm should not depend on a generated id surviving a
+round-trip.
+
+Fix: give the alarm a **fixed, explicit id** (e.g. `smartjourney_alarm`) when
+displaying it — `showAlarmNotification` already reuses one id across stages 3–5, so
+this only makes existing behaviour explicit — and cancel that id in `stopAll()` and
+once at startup, where any alarm is by definition stale. This also closes F6's
+stale-notification half.
 
 ### F5 — map-based destination selection is non-functional
 
@@ -206,21 +219,88 @@ key (`PLACEHOLDER_REPLACE_WITH_REAL_GOOGLE_MAPS_API_KEY`) prevents the map from
 initialising. This removes the only way to pick an arbitrary nearby point, which
 matters for testing and for the product.
 
-### Scenario C2 — escalation timing not yet measured
+### F6 — escalation lives only in memory and dies with the process (critical)
 
-The alarm fired and escalated this run, but the dedicated 5 s poll loop was killed
-part-way so there are **no per-stage timestamps**. What is known: the siren started
-at 17:56:09, the full-screen intent fired at 17:56:24, and the alarm was still
-sounding ~5 minutes later when it was stopped — so escalation certainly continued,
-but the +90 s / +180 s timings under Doze remain unmeasured. C2 needs a dedicated
-run with the poll loop (§0.4) left to complete.
+**The escalation ladder is lost entirely if the app process is killed while the
+alarm is ringing.** Stage 4 and Stage 5 — the stages whose whole purpose is to
+wake a deep sleeper when Stage 3 was not enough — never fire, and the siren dies
+with the process, leaving only a stale notification that still reads "Wake Up!".
+
+Observed directly. Run A (`Start Tracking` + screen off):
+
+```
+18:01:10   Wake Up!                        stage 3 fires, siren starts
+18:02:29   ActivityManager: Killing 16484:com.smartjourney.app/u0a311 (adj 905): remove task
+18:02:29   AS.AudioDeviceBroker: Communication client died        <- siren dies with the process
+18:02:30   ReactNativeJS: Running "main"   (pid 18772)            <- fresh JS context
+18:06:47   polling ends, 5+ minutes elapsed
+           MAXIMUM ALARM      never observed
+           EMERGENCY MODE     never observed
+```
+
+Because `AlarmService.stage`, `escalationTimer` and the siren player are all
+`static` in-memory state, a restarted JS context begins at `stage = NONE`. Nothing
+re-arms escalation and nothing clears the notification, so the traveller gets a
+silent phone and a stuck notification while believing an alarm is running.
+
+This also **corrects an earlier claim in this file**: Run A's ~5 minutes of siren
+was previously read as "escalation certainly continued". It did not. A looping
+siren sounds identical whether or not escalation is happening, which is exactly
+why the notification title had to be polled rather than inferred.
+
+The kill reason recorded was `remove task` at adj 905 (cached). A
+`REQUEST_PERMISSIONS` activity had started at 18:01:05 when *Start Tracking* was
+pressed, so the precise trigger is not fully pinned down — it may have been
+influenced by the screen being turned off while that dialog was up. **The
+consequence, however, is trigger-independent**: any process death during an alarm
+(low memory, OEM kill, task removal, crash) silently cancels the escalation ladder
+for good.
+
+Fix direction: escalation must not depend on process-resident timers. Use a
+mechanism the OS owns and restores — notifee trigger notifications
+(`TimestampTrigger`) or an `AlarmManager`-backed alarm — so stages 4 and 5 still
+arrive after a process restart. The alarm notification should also carry a fixed
+id so a restarted process can find and cancel it (see F4).
+
+### Scenario C2 — escalation timing: measured and correct
+
+Run B kept the app in the **foreground** so the process survived, and polled the
+notification title (the only discriminator — stages 3–5 share one notification id)
+every 3 s:
+
+| Stage | Observed | Delta from previous | Design constant |
+|---|---|---|---|
+| 3 `Wake Up!` | 18:09:38 | — | fired 7 s after Start Tracking |
+| 4 `MAXIMUM ALARM` | 18:11:09 | **+91 s** | `ESCALATION_TO_MAX_MS` = 90 s |
+| 5 `EMERGENCY MODE` | 18:14:07 | **+178 s** | `ESCALATION_TO_EMERGENCY_MS` = 180 s |
+
+`pid` stayed `19622` throughout. Both deltas are within 1–2 s, i.e. inside the 3 s
+polling resolution — **escalation timing is accurate**. Combined with F6, the
+picture is unambiguous: the ladder is correct when the process lives, and is lost
+completely when it does not.
+
+Measurement detail: the journey was set to a destination only **1.1 km** away with
+wake distance at the 20 km maximum, and confidence read **48% (POOR)** — so
+arrival additionally exercised the `LOW_CONFIDENCE_CONFIRMATIONS = 2` guard, and
+still fired.
+
+**C2 under forced Doze is not measurable, and that is fine.** Attempting it showed
+`mState` returning to `ACTIVE` 19 s after the alarm began: the alarm's full-screen
+intent wakes the device, which is precisely the intended behaviour. Doze cannot
+persist through an alarm that successfully takes over the screen, so the
+"escalation clock under Doze" worry is largely moot *provided the full-screen
+intent works*. It did — `notifee.core.NotificationReceiverActivity` launched over
+the launcher in the earlier run.
 
 ## Outstanding
 
-- Scenario C2 — Stage 3→4→5 timings under Doze, with the poll loop running to completion
+- **F6 — the critical one.** Escalation must survive process death; today it does not.
 - Scenario A / B — a real approach, and a true screen-off locked-screen arrival
 - Scenario D — battery saver / restricted background
 - Scenario E1/E2 — deliberate process-death and OEM-kill runs capturing the banner
 - Scenario F — battery drain with the device genuinely unplugged
 - Scenario G — a real journey that actually wakes the traveller (§15 itself)
-- F3, F4, F5 above
+- F3 (JS console on release unproven), F4 (fragile alarm notification id),
+  F5 (map selection blocked by the placeholder Maps key)
+- Scenario C2 under Doze is not measurable and does not need to be: the alarm's
+  full-screen intent exits Doze by design.
