@@ -295,40 +295,32 @@ configured** — a Google Cloud resource that cannot be created from this reposi
 Until then, text search via Nominatim remains the reliable way to choose a
 destination, and it works.
 
-#### Key-free tiles — implemented, visually unconfirmed
+#### Key-free tiles — tried, and they do not work
 
 There is no provider switch to escape the key: `react-native-maps/android/build.gradle`
 declares `com.google.android.gms:play-services-maps:19.1.0`, so on Android the
-library *is* the Google Maps SDK. It does however support supplying your own tiles:
-`mapType="none"` disables the un-authorisable Google base map and `UrlTile` draws
-from a URL template. `src/config/mapTiles.ts` now points that at OpenStreetMap, and
-the OSM tile server was confirmed to return HTTP 200 `image/png` even with a
-Dalvik-style User-Agent (so the missing UA hook is not fatal in practice).
-`flipY` is left at its Android default of `false`, which is correct for OSM's XYZ
-scheme — setting it true would flip every tile.
+library *is* the Google Maps SDK. It does document a way to supply your own tiles —
+`mapType="none"` to disable the un-authorisable base map, plus `UrlTile` drawing
+from a URL template — and that was implemented with OpenStreetMap. The OSM tile
+server was confirmed to return HTTP 200 `image/png` even with a Dalvik-style
+User-Agent, and `flipY` was left at its Android default of `false`, which is correct
+for OSM's XYZ scheme.
 
-Verified: `tsc` clean, release build succeeds, both `MapView`s keep their correct
-geometry, the pin flow still works, and the tile URL is reachable.
+**It does not render.** On the device the map area showed a **black region with the
+Google watermark in the corner** — the Google map view is alive, the base map is
+disabled by `mapType="none"`, and the `UrlTile` overlay drew nothing. The tile
+overlay is part of the same unauthorised Google Maps SDK, so overriding the base
+map does not escape the authorization requirement.
 
-**Not verified: whether tiles actually rasterise.** The screen cannot be inspected
-from this tooling, and the fallback plan of measuring tile traffic was abandoned
-after the instrument failed validation — total device rx bytes from
-`dumpsys netstats` were byte-identical across a 6-second gap, so it cannot detect a
-few hundred KB of tiles. An earlier apparent "0 bytes delta" was therefore
-meaningless and is not evidence either way. A visual check on the device settles it.
+**Conclusion: react-native-maps cannot display any map imagery without a valid
+Google Maps API key** — neither Google's base map nor custom tile sources. The
+attempt has been reverted (the `UrlTile` overlay and `mapType` override are gone),
+leaving only the layout fix, which is a genuine and verified improvement. Verified
+path forward is either a real Google Maps API key, or a map library with no Google
+dependency (for example MapLibre) against a tile service you are entitled to use.
 
-Two caveats before this ships:
-
-- Google's Maps SDK terms restrict displaying non-Google map data through it, so
-  using the SDK purely as a renderer for OSM tiles is at best a grey area.
-- The public OSM tile server is for light use only, and its usage policy expects an
-  identifying User-Agent — which **cannot be set**, because the fetch is performed
-  inside Google's `UrlTileProvider` and react-native-maps exposes no header hook.
-
-So the clean long-term answer is still either a real Google Maps key, or a map
-library with no Google dependency (for example MapLibre) pointed at a tile service
-you are entitled to use. The current arrangement is a reasonable development
-default and is a one-constant change to revisit.
+Recorded because it is a negative result worth not repeating: black-plus-watermark
+is the signature of "Google map view up, nothing authorised to draw".
 
 ### F6 — escalation lives only in memory (robustness gap, not an observed system kill)
 
