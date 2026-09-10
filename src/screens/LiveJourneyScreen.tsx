@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Card, IconButton, Button, ProgressBar } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker, UrlTile } from 'react-native-maps';
 import {
   useBatteryLevel,
   useBatteryState as useBatteryStateHook,
@@ -11,6 +11,7 @@ import {
 import { useJourneyStore } from '../store/useJourneyStore';
 import { useHistoryStore } from '../store/useHistoryStore';
 import { LocationService } from '../services/LocationService';
+import { KEYLESS_MAP_TYPE, OSM_TILE_URL } from '../config/mapTiles';
 import AlarmService from '../services/AlarmService';
 
 export function LiveJourneyScreen() {
@@ -108,6 +109,7 @@ export function LiveJourneyScreen() {
       <View style={{ height: mapHeight }}>
         <MapView
           style={{ flex: 1 }}
+          mapType={KEYLESS_MAP_TYPE}
           region={{
             latitude: destination.lat,
             longitude: destination.lng,
@@ -115,6 +117,7 @@ export function LiveJourneyScreen() {
             longitudeDelta: 0.05,
           }}
         >
+          <UrlTile urlTemplate={OSM_TILE_URL} maximumZ={19} />
           <Marker coordinate={{ latitude: destination.lat, longitude: destination.lng }} />
         </MapView>
       </View>

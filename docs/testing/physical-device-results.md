@@ -295,6 +295,41 @@ configured** — a Google Cloud resource that cannot be created from this reposi
 Until then, text search via Nominatim remains the reliable way to choose a
 destination, and it works.
 
+#### Key-free tiles — implemented, visually unconfirmed
+
+There is no provider switch to escape the key: `react-native-maps/android/build.gradle`
+declares `com.google.android.gms:play-services-maps:19.1.0`, so on Android the
+library *is* the Google Maps SDK. It does however support supplying your own tiles:
+`mapType="none"` disables the un-authorisable Google base map and `UrlTile` draws
+from a URL template. `src/config/mapTiles.ts` now points that at OpenStreetMap, and
+the OSM tile server was confirmed to return HTTP 200 `image/png` even with a
+Dalvik-style User-Agent (so the missing UA hook is not fatal in practice).
+`flipY` is left at its Android default of `false`, which is correct for OSM's XYZ
+scheme — setting it true would flip every tile.
+
+Verified: `tsc` clean, release build succeeds, both `MapView`s keep their correct
+geometry, the pin flow still works, and the tile URL is reachable.
+
+**Not verified: whether tiles actually rasterise.** The screen cannot be inspected
+from this tooling, and the fallback plan of measuring tile traffic was abandoned
+after the instrument failed validation — total device rx bytes from
+`dumpsys netstats` were byte-identical across a 6-second gap, so it cannot detect a
+few hundred KB of tiles. An earlier apparent "0 bytes delta" was therefore
+meaningless and is not evidence either way. A visual check on the device settles it.
+
+Two caveats before this ships:
+
+- Google's Maps SDK terms restrict displaying non-Google map data through it, so
+  using the SDK purely as a renderer for OSM tiles is at best a grey area.
+- The public OSM tile server is for light use only, and its usage policy expects an
+  identifying User-Agent — which **cannot be set**, because the fetch is performed
+  inside Google's `UrlTileProvider` and react-native-maps exposes no header hook.
+
+So the clean long-term answer is still either a real Google Maps key, or a map
+library with no Google dependency (for example MapLibre) pointed at a tile service
+you are entitled to use. The current arrangement is a reasonable development
+default and is a one-constant change to revisit.
+
 ### F6 — escalation lives only in memory (robustness gap, not an observed system kill)
 
 **Correction.** An earlier version of this file called this "critical" and implied

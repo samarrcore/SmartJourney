@@ -2,10 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Button, IconButton } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker, UrlTile } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useJourneyStore } from '../store/useJourneyStore';
 import { SearchService, PlaceResult } from '../services/SearchService';
+import { KEYLESS_MAP_TYPE, OSM_TILE_URL } from '../config/mapTiles';
 
 const DEFAULT_REGION = {
   latitude: 37.78825,
@@ -153,6 +154,7 @@ export function DestinationSearchScreen() {
       <View style={{ height: mapHeight }}>
         <MapView
           style={{ flex: 1 }}
+          mapType={KEYLESS_MAP_TYPE}
           region={mapRegion}
           onPress={({ nativeEvent }) => {
             if (nativeEvent.coordinate) {
@@ -163,6 +165,7 @@ export function DestinationSearchScreen() {
             }
           }}
         >
+          <UrlTile urlTemplate={OSM_TILE_URL} maximumZ={19} />
           {mapRegion !== DEFAULT_REGION && (
             <Marker coordinate={{ latitude: mapRegion.latitude, longitude: mapRegion.longitude }} title="Current Location" pinColor="#4f46e5" />
           )}
